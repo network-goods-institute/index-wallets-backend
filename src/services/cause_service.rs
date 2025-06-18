@@ -67,16 +67,13 @@ impl CauseService {
 
     // New draft-based cause creation
     pub async fn create_cause(&self, cause_data: CreateCauseRequest) -> Result<serde_json::Value, ApiError> {
-        info!("Starting cause creation for: {}", cause_data.name);
-        
-        // 1. Validate
+        // Validate
         self.validate_cause_data(&cause_data).await
             .map_err(|e| {
-                error!("Validation failed: {:?}", e);
+                error!("Validation failed: {}", e);
                 e
             })?;
         
-        // 2. Create draft
         let draft = CauseDraft::new(
             cause_data.name.clone(),
             cause_data.organization.clone(),
@@ -89,7 +86,6 @@ impl CauseService {
             cause_data.cause_image_url.clone(),
         );
         
-        // 3. Save draft to MongoDB
         let draft_id = self.mongodb_service.create_draft(draft.clone())
             .await
             .map_err(|e| {
@@ -106,7 +102,7 @@ impl CauseService {
                 }
             })?;
         
-        // 4. Create Stripe Connected Account with draft metadata
+        // Create Stripe Connected Account with draft metadata
         let account_params = stripe::CreateAccount {
             type_: Some(stripe::AccountType::Express),
             country: Some("US"),
@@ -131,11 +127,11 @@ impl CauseService {
         let account = stripe::Account::create(&self.stripe_client, account_params)
             .await
             .map_err(|e| {
-                error!("Failed to create Stripe Connected Account: {:?}", e);
+                error!("Failed to create Stripe Connected Account: {}", e);
                 ApiError::StripeError(format!("Stripe account creation failed: {}", e))
             })?;
         
-        // 5. Update draft with Stripe account ID
+        // Update draft with Stripe account ID
         let draft_object_id = ObjectId::parse_str(&draft_id)
             .map_err(|_| ApiError::ValidationError("Invalid draft ID".to_string()))?;
             
@@ -147,7 +143,7 @@ impl CauseService {
             }
         ).await.map_err(ApiError::DatabaseError)?;
         
-        // 6. Create onboarding link
+        // Create onboarding link
         let refresh_url = format!("{}/setup/status?draft={}", 
             std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()), 
             draft_id
@@ -171,7 +167,6 @@ impl CauseService {
             .await
             .map_err(|e| ApiError::StripeError(e.to_string()))?;
         
-        // 7. Return draft info with onboarding URL
         Ok(serde_json::json!({
             "draft_id": draft_id,
             "stripe_account_id": account.id.to_string(),
@@ -200,7 +195,6 @@ impl CauseService {
                     .await
                     .map_err(ApiError::DatabaseError)?
                     .ok_or_else(|| ApiError::NotFound("Cause not found".to_string()))?;
-                info!("Draft {} already completed, returning existing cause", draft_id);
                 return Ok(cause);
             }
             return Err(ApiError::ValidationError("Draft marked as completed but no cause ID found".to_string()));
@@ -224,7 +218,7 @@ impl CauseService {
         // Log payouts status for monitoring
         let payouts_enabled = account.payouts_enabled.unwrap_or(false);
         if !payouts_enabled {
-            info!("Warning: Account {} has charges_enabled but payouts_enabled is false", account_id);
+            log::warn!("Account {} has charges_enabled but payouts_enabled is false", account_id);
         }
         
         // Create the actual cause using the full flow
@@ -277,14 +271,13 @@ impl CauseService {
     
     // Original method renamed - used internally after onboarding
     async fn create_cause_full(&self, cause_data: CreateCauseRequest, existing_account_id: Option<String>) -> Result<Cause, ApiError> {
-        // 1. Validate and check for duplications
+        // Validate and check for duplications
         self.validate_cause_data(&cause_data).await?;
         
-        // 2. Start transaction with MongoDB (create with PENDING status)
         let cause = self.create_pending_cause(&cause_data).await?;
         let cause_id = cause.id.unwrap();
         
-        // 3. Use existing account or create new one
+        // Use existing account or create new one
         let account_id = if let Some(existing_id) = existing_account_id {
             // Update cause with existing account ID
             self.update_cause_account_id(&cause_id, &existing_id).await?;
@@ -298,7 +291,7 @@ impl CauseService {
             new_account_id
         };
         
-        // 4. Create Stripe product on the platform account (not the connected account)
+        // Create Stripe product on the platform account (not the connected account)
         let stripe_id = self.create_stripe_product(&cause).await?;
         
         // Create price for the product
@@ -310,10 +303,10 @@ impl CauseService {
         // Update cause with Stripe ID and status
         self.update_cause_stripe_id(&cause_id, &stripe_id, &payment_link).await?;
         
-        // 5. Get updated cause with Stripe ID, stripe product id 
+ 
         let updated_cause = self.get_cause_by_id(&cause_id).await?;
         
-        // 6. Mint token
+        // Mint token
         match self.mint_token_for_cause(&updated_cause).await {
             Ok(token_id) => {
                 // Update cause with token ID and set to ACTIVE
@@ -326,7 +319,6 @@ impl CauseService {
             }
         }
         
-        // 7. Get and return the finalized cause
         self.get_cause_by_id(&cause_id).await
     }
 
@@ -383,7 +375,7 @@ impl CauseService {
     
     // Temporary method to simulate Stripe product creation
     async fn create_connected_account(&self, cause: &Cause) -> Result<String, ApiError> {
-        info!("Creating Stripe Connected Account for cause: {}", cause.name);
+        // Creating Stripe Connected Account
         
         let account_params = stripe::CreateAccount {
             type_: Some(stripe::AccountType::Express),
@@ -408,7 +400,7 @@ impl CauseService {
         
         match stripe::Account::create(&self.stripe_client, account_params).await {
             Ok(account) => {
-                info!("Successfully created Connected Account: {}", account.id);
+                // Successfully created Connected Account
                 Ok(account.id.to_string())
             },
             Err(e) => {
@@ -419,7 +411,7 @@ impl CauseService {
     }
 
     async fn create_stripe_product(&self, cause: &Cause) -> Result<String, ApiError> {
-        info!("Creating Stripe product for cause: {}", cause.name);
+        // Creating Stripe product
 
         let product_create_params = stripe::CreateProduct {
             name: &cause.name,
@@ -446,7 +438,7 @@ impl CauseService {
 
         match stripe::Product::create(&self.stripe_client, product_create_params).await {
             Ok(product) => {
-                info!("Successfully created Stripe product: {}", product.id);
+                // Successfully created Stripe product
                 Ok(product.id.to_string())
             },
             Err(e) => {
@@ -457,7 +449,7 @@ impl CauseService {
     }
 
     async fn create_product_price(&self, stripe_id: &str) -> Result<String, ApiError> {
-        info!("Creating Stripe price for product: {}", stripe_id);
+        // Creating Stripe price
 
         let price_create_params = stripe::CreatePrice {
             currency: stripe::Currency::USD,
@@ -488,7 +480,7 @@ impl CauseService {
 
         match stripe::Price::create(&self.stripe_client, price_create_params).await {
             Ok(price) => {
-                info!("Successfully created Stripe price: {}", price.id);
+                // Successfully created Stripe price
                 Ok(price.id.to_string())
             },
             Err(e) => {
@@ -816,7 +808,7 @@ impl CauseService {
     }
     
     async fn mint_token_for_cause(&self, cause: &Cause) -> Result<String, ApiError> {
-        info!("Minting token for cause: {}", cause.name);
+        // Minting token for cause
         
         // Initial supply for the cause token
         let initial_supply = 1_000_000; // 1 million tokens
@@ -990,7 +982,7 @@ impl CauseService {
         amount_cents: i64,
         user_wallet_address: &str,
     ) -> Result<(String, String), ApiError> {
-        info!("Creating donation checkout session for {} with amount {} cents", cause.name, amount_cents);
+        // Creating donation checkout session
         
         // Validate amount
         if amount_cents < 100 {
@@ -1077,7 +1069,7 @@ impl CauseService {
         // Create the session
         match stripe::CheckoutSession::create(&self.stripe_client, params).await {
             Ok(session) => {
-                info!("Successfully created checkout session: {}", session.id);
+                // Successfully created checkout session
                 Ok((session.id.to_string(), session.url.unwrap_or_default()))
             },
             Err(e) => {

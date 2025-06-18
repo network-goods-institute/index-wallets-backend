@@ -18,14 +18,27 @@ pub struct ExecutorClient {
 impl ExecutorClient {
     /// Create a new ExecutorClient
     pub fn new() -> Self {
-        let host = env::var("SERVER_HOST").unwrap_or_else(|_| "localhost".to_string());
-        let port = env::var("EXECUTOR_PORT")
-            .ok()
-            .and_then(|p| p.parse::<u16>().ok())
-            .unwrap_or(8081);
+        let environment = env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string());
         
-        let base_url = format!("http://{}:{}", host, port);
-        info!("Executor client connecting to: {}", base_url);
+        let base_url = if environment == "production" {
+            // In production, use EXECUTOR_URL which should be the full Railway URL
+            env::var("EXECUTOR_URL")
+                .unwrap_or_else(|_| {
+                    error!("EXECUTOR_URL not set in production environment!");
+                    panic!("EXECUTOR_URL must be set when ENVIRONMENT=production");
+                })
+        } else {
+            // In development, construct from host:port
+            let host = env::var("SERVER_HOST").unwrap_or_else(|_| "localhost".to_string());
+            let port = env::var("EXECUTOR_PORT")
+                .ok()
+                .and_then(|p| p.parse::<u16>().ok())
+                .unwrap_or(8081);
+            
+            format!("http://{}:{}", host, port)
+        };
+        
+        info!("Executor client connecting to: {} (environment: {})", base_url, environment);
         
         Self {
             base_url,

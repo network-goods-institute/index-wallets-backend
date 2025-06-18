@@ -29,9 +29,6 @@ impl BondingCurve {
         
         let result = amount / avg_price;
         
-        log::info!("Bonding curve calc: amount=${}, current_tokens={}, current_price=${}, avg_price=${}, result={} tokens", 
-                  amount, current_tokens_purchased, current_price, avg_price, result);
-        
         result
     }
 

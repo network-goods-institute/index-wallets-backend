@@ -74,8 +74,6 @@ pub async fn create_payment(
     let payment_id = db.generate_payment_id();
     log::info!("Generated payment ID: {}", payment_id);
 
-    // probably need to change the shape of the vendor valuations right? let's be thoughtful about this 
-    // and how we want to use it later
     
     let payment = Payment {
         id: None,
@@ -142,7 +140,7 @@ pub async fn supplement_transaction(
         }
     };
 
-    // Step 2: Fetch vendor preferences from database
+    // Fetch vendor preferences from database
     let vendor_preferences = match db.get_user_preferences(&payment.vendor_address).await {
         Ok(prefs) => prefs,
         Err(e) => {
@@ -151,7 +149,7 @@ pub async fn supplement_transaction(
         }
     };
 
-    // Step 3: Calculate vendor valuations + discount consumption
+    // Calculate vendor valuations + discount consumption
     log::info!("Vendor preferences: {:?}", vendor_preferences);
     log::info!("Payer balances: {:?}", supplement_data.payer_balances);
     log::info!("Payment amount: {}", payment.price_usd);
@@ -162,7 +160,7 @@ pub async fn supplement_transaction(
     log::info!("Calculated vendor valuations: {:?}", vendor_valuations);
     log::info!("Calculated discount consumption: {:?}", discount_consumption);
 
-    // Step 4: Calculate payment bundle
+    // Calculate payment bundle
     let payment_bundle = match calculate_payment_bundle(
         &supplement_data.payer_balances,
         &vendor_valuations,
@@ -183,7 +181,7 @@ pub async fn supplement_transaction(
     let vendor_valuations_for_response = vendor_valuations.clone();
     let discount_consumption_for_response = discount_consumption.clone();
 
-    // Step 5: Update payment with calculated data
+    // Update payment with calculated data
     if let Err(e) = db.update_payment_with_calculations(
         &payment_id,
         vendor_valuations,
@@ -194,7 +192,7 @@ pub async fn supplement_transaction(
         return Err(e);
     }
 
-    // Step 6: Generate unsigned transaction
+    // Generate unsigned transaction
     let unsigned_transaction = match generate_unsigned_transaction(
         wallet_service.get_ref(),
         &supplement_data.payer_address,

@@ -29,22 +29,18 @@ async fn process_stripe_webhook(
     cause_service: web::Data<CauseService>,
     mongodb_service: web::Data<MongoDBService>,
 ) -> Result<(), WebhookError> {
-    // 1. Get payload as str
     let payload_str = std::str::from_utf8(payload.as_ref())
         .map_err(|e| WebhookError::InvalidPayload(e.to_string()))?;
 
-    // 2. Get the signature header
     let stripe_signature = get_header_value(&req, "Stripe-Signature")
         .ok_or_else(|| WebhookError::MissingSignature)?;
 
-    // 3. Verify & parse the event
     let event = Webhook::construct_event(
         payload_str,
         stripe_signature,
         webhook_service.get_stripe_secret(),
     )?;
 
-    // 4. Handle the event based on its type
     match event.type_ {
         EventType::CheckoutSessionCompleted => {
             if let EventObject::CheckoutSession(sess) = event.data.object {

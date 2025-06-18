@@ -218,18 +218,13 @@ impl TokenService {
             allowances,
         };
 
-        // print the debit: 
-        println!("Debit: {:?}", debit);
 
         // Sign the DebitAllowance
         let signed = SignedMessage::sign(debit, from_keypair)
             .map_err(|e| format!("Failed to sign DebitAllowance: {:?}", e))?;
         
-        // print the signed: 
-
         // Create a VerifiableType::DebitAllowance with the signed message
         let verifiable = VerifiableType::DebitAllowance(signed);
-        println!("Verifiable: {:?}", verifiable);
         
         // Submit to executor
         match self.executor_client.submit_verifiables(vec![verifiable]).await {

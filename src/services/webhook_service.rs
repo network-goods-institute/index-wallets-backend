@@ -100,11 +100,8 @@ impl WebhookService {
         let (tokens_minted, new_price) = if token_symbol != "USD" && token_symbol != "unknown" {
             match self.mongodb_service.get_cause_by_token_symbol(token_symbol).await {
                 Ok(Some(cause)) => {
-                    info!("Current cause state - tokens_purchased: {}, amount_donated: ${}", 
-                          cause.tokens_purchased, cause.amount_donated);
                     let curve = BondingCurve::new();
                     let tokens = curve.calculate_tokens_for_amount(amount_in_dollars, cause.tokens_purchased);
-                    info!("Bonding curve calculation - amount: ${}, tokens: {}", amount_in_dollars, tokens);
                     let new_tokens_purchased = cause.tokens_purchased + tokens;
                     let new_price = curve.calculate_price(new_tokens_purchased);
                     
@@ -118,14 +115,11 @@ impl WebhookService {
                         new_price,
                     ).await.map_err(|e| WebhookError::TokenTransferError(format!("Failed to update bonding curve: {}", e)))?;
                     
-                    info!("Updated bonding curve - Amount donated: ${:.2}, Tokens purchased: {:.2}, New price: ${:.6}", 
-                          new_amount_donated, new_tokens_purchased, new_price);
                     
                     (tokens, new_price)
                 },
                 Ok(None) => {
                     // Cause not found
-                    info!("Cause not found for token {}, using simple token calculation", token_symbol);
                     (amount_to_cause as f64, 1.0)
                 },
                 Err(e) => {
@@ -136,7 +130,6 @@ impl WebhookService {
             }
         } else {
             // USD or unknown token, use simple calculation
-            info!("USD or unknown token, using simple token calculation");
             (amount_to_cause as f64, 1.0)
         };
         
@@ -147,20 +140,6 @@ impl WebhookService {
         let platform_tokens = (tokens_minted_u64 as f64 * (5.0 / 95.0)).round() as u64;
         let user_tokens = tokens_minted_u64 - platform_tokens;
         
-        info!(
-            "Donation: {} units total", total_amount_u64
-        );
-        info!(
-            "Cash split: {} to cause (95%), {} platform fee (5%)", 
-            amount_to_cause, platform_cash_fee
-        );
-        info!(
-            "Token split: {} tokens minted from $95, {} to user (94.74%), {} to platform (5.26%)",
-            tokens_minted_u64, user_tokens, platform_tokens
-        );
-        if token_symbol != "USD" && token_symbol != "unknown" {
-            info!("New token price: ${:.6}", new_price);
-        }
         
         // Parse the public key
         let user_pubkey = Ed25519PubKey::from_str(user_address)

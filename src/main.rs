@@ -95,10 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stripe_api = env::var("STRIPE_SECRET_TEST").unwrap_or_else(|_| "".to_string());
     let stripe_webhook_secret = env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_else(|_| "".to_string());
 
-    // Initialize logger with log level from environment
     env_logger::init_from_env(env_logger::Env::new().default_filter_or(log_level));
     
-    // Initialize MongoDB
     let mongodb = MongoDBService::init()
         .await
         .expect("Failed to initialize MongoDB");
@@ -111,31 +109,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Central vault pubkey: {}", key_config.central_vault_pubkey);
     info!("Network goods vault pubkey: {}", key_config.network_goods_vault_pubkey);
 
-    // Initialize the wallet service
     let wallet_service = web::Data::new(WalletService::new(mongodb_data.clone()));
     
-    // Initialize the token service
     let token_service = web::Data::new(TokenService::new(
         mongodb_data.clone(),
         key_config.central_vault_keypair.clone()
     ));
     
-    // Initialize USD token if it doesn't exist
     initialize_usd_token(&token_service).await?;
     
-    // Initialize Stripe client
     let stripe_client = stripe::Client::new(&stripe_api);
     let stripe_client_arc = Arc::new(stripe_client.clone());
     let stripe_client_data = web::Data::new(stripe_client);
 
-    // Initialize the cause service
     let cause_service = web::Data::new(CauseService::new(
         Arc::new(mongodb_data.get_ref().clone()),
         Arc::new(token_service.get_ref().clone()),
         stripe_client_arc.clone()
     ));
 
-    // Initialize the webhook service
     let webhook_service = web::Data::new(WebhookService::new(
         stripe_webhook_secret,
         Arc::new(token_service.get_ref().clone()),
