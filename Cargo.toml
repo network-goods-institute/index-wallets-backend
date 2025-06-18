@@ -1,0 +1,59 @@
+[package]
+name = "index-wallets-backend"
+version = "0.1.0"
+edition = "2021"
+default-run = "index-wallets-backend"
+
+[[bin]]
+name = "generate_keys"
+path = "generate_keys.rs"
+
+[dependencies]
+actix-cors = "0.6.4"
+bson = { version = "2.14.0", features = ["chrono-0_4"] }
+chrono = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+futures-util = "0.3.31"
+reqwest = { version = "0.11", features = ["json"] }
+actix-web = { version = "4.0", features = ["rustls"] }
+rustls = "0.21"
+rustls-pemfile = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+env_logger = "0.10"
+log = "0.4"
+tokio = { version = "1.0", features = ["full"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = { version = "0.8.5"}
+base64 = "0.22"
+base32 = "0.4"
+dotenv = "0.15"
+mongodb = "2.8"
+futures = "0.3"
+
+delta_executor_sdk = { version = "0.4.1", registry = "delta" }
+hex = "0.4"
+clap = { version = "4.0", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+async-stripe = { version = "0.31", features = ["runtime-tokio-hyper"] }
+thiserror = "1.0"
+
+
+[dev-dependencies]
+# Development-only dependencies go here
+# For example, if we add testing libraries later
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+strip = true  # Strip symbols from binary
+lto = true    # Enable link-time optimization
+codegen-units = 1  # Optimize for size
+panic = 'abort'    # Remove panic unwinding code in release
+
+
