@@ -109,8 +109,9 @@ fn handle_webhook(req: &HttpRequest, payload: &web::Bytes) -> Result<(), Webhook
     // 2. grab the signature header
     let stripe_signature = get_header_value(&req, "Stripe-Signature").unwrap_or_default();
 
-    // 3. your webhook secret
-    let secret = "whsec_865917b1ca5cef5a6eea9cd086fb15fd7da35ddcece4c13db311d9f71d1fdc25"; 
+    // Get webhook secret from environment
+    let secret = std::env::var("STRIPE_WEBHOOK_SECRET")
+        .expect("STRIPE_WEBHOOK_SECRET must be set"); 
     // 4. verify & parse
     let event = Webhook::construct_event(payload_str, stripe_signature, &secret)?;
 

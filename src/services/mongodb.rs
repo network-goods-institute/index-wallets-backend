@@ -605,6 +605,7 @@ impl MongoDBService {
         &self,
         user_address: &str,
         discount_consumptions: &[DiscountConsumption],
+        _effective_valuations: Option<&[(String, f64)]>, // Deprecated parameter, kept for compatibility
     ) -> Result<(), ApiError> {
         // Get current preferences
         let current_prefs = self.get_user_preferences(user_address).await?;
@@ -645,6 +646,9 @@ impl MongoDBService {
             }
         }
         
+        // Note: We no longer store effective valuations in preferences
+        // They are now stored in transaction records for market price calculation
+        
         // Update user preferences in database
         let filter = doc! { "wallet_address": user_address };
         let update = doc! {
@@ -667,6 +671,7 @@ impl MongoDBService {
         vendor_valuations: Vec<TokenValuation>,
         discount_consumption: Vec<DiscountConsumption>,
         computed_payment: Vec<TokenPayment>,
+        initial_payment_bundle: Vec<TokenPayment>,
     ) -> Result<(), ApiError> {
         let filter = doc! { "payment_id": payment_id };
         let update = doc! {
@@ -676,6 +681,8 @@ impl MongoDBService {
                 "discount_consumption": bson::to_bson(&discount_consumption)
                     .map_err(|e| ApiError::InternalError(format!("Serialization error: {}", e)))?,
                 "computed_payment": bson::to_bson(&computed_payment)
+                    .map_err(|e| ApiError::InternalError(format!("Serialization error: {}", e)))?,
+                "initial_payment_bundle": bson::to_bson(&initial_payment_bundle)
                     .map_err(|e| ApiError::InternalError(format!("Serialization error: {}", e)))?,
                 "status": bson::to_bson(&PaymentStatus::Calculated)
                     .map_err(|e| ApiError::InternalError(format!("Failed to serialize status: {}", e)))?

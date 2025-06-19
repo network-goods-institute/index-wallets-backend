@@ -65,6 +65,7 @@ pub struct TokenBalance {
     pub symbol: String,
     pub name: String,
     pub balance: f64,
+    // TODO: rename average_valuation to market_valuation
     pub average_valuation: f64,
     #[serde(default)]
     pub token_image_url: Option<String>,

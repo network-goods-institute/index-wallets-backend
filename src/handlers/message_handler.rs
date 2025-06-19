@@ -7,7 +7,7 @@ use delta_executor_sdk::base::core::Shard;
 use serde_json::json;
 use crate::models::{Message, User, CreateUserRequest, Preferences, ApiError, Payment, CreatePaymentRequest, PaymentStatus, PaymentIdResponse, SupplementPaymentRequest, SupplementPaymentResponse, TokenPayment, TransactionRecord, TokenValuation, DepositRecord};
 use crate::models::payment::{PaymentStatusResponse, ProcessSignedTransactionRequest, TransactionHistoryResponse, TransactionHistoryItem, TransactionDirection, ActivityItem};
-use crate::utils::{calculate_vendor_valuations, calculate_payment_bundle};
+use crate::utils::{calculate_vendor_valuations, calculate_payment_bundle, apply_discounts_to_payment, calculate_post_payment_valuations, verify_sufficient_funds_after_discounts};
 use crate::services::{MongoDBService, TokenService, WalletService};
 use ed25519_dalek::SigningKey;
 use chrono::Utc;
@@ -91,6 +91,7 @@ pub async fn create_payment(
         vendor_valuations: payment_request.vendor_valuations.clone(),
         discount_consumption: None,
         computed_payment: None,
+        initial_payment_bundle: None,
     };
 
     log::info!("Creating payment in database: {:?}", payment);
@@ -149,7 +150,6 @@ pub async fn supplement_transaction(
         }
     };
 
-    // Calculate vendor valuations + discount consumption
     log::info!("Vendor preferences: {:?}", vendor_preferences);
     log::info!("Payer balances: {:?}", supplement_data.payer_balances);
     log::info!("Payment amount: {}", payment.price_usd);
@@ -160,8 +160,8 @@ pub async fn supplement_transaction(
     log::info!("Calculated vendor valuations: {:?}", vendor_valuations);
     log::info!("Calculated discount consumption: {:?}", discount_consumption);
 
-    // Calculate payment bundle
-    let payment_bundle = match calculate_payment_bundle(
+    // Calculate proportional payments before discounts
+    let initial_payment_bundle = match calculate_payment_bundle(
         &supplement_data.payer_balances,
         &vendor_valuations,
         payment.price_usd,
@@ -176,17 +176,48 @@ pub async fn supplement_transaction(
             return Err(ApiError::ValidationError("Insufficient funds".to_string()));
         }
     };
+    
+    // Clone for final payment calculation
+    let mut payment_bundle = initial_payment_bundle.clone();
+    
+    // Apply discounts to the payment
+    if let Err(e) = apply_discounts_to_payment(
+        &mut payment_bundle,
+        &discount_consumption,
+        &supplement_data.payer_balances,
+    ) {
+        log::error!("Failed to apply discounts: {}", e);
+        return Err(ApiError::InternalError("Failed to apply discounts".to_string()));
+    }
+
+    // Verify sufficient funds after discounts/premiums
+    let actual_cost = match verify_sufficient_funds_after_discounts(
+        &payment_bundle,
+        &supplement_data.payer_balances,
+        payment.price_usd,
+    ) {
+        Ok(cost) => {
+            log::info!("Payment feasible. Original price: ${:.2}, Actual cost after adjustments: ${:.2}", 
+                payment.price_usd, cost);
+            cost
+        },
+        Err(e) => {
+            log::error!("Insufficient funds after vendor adjustments: {}", e);
+            return Err(ApiError::ValidationError(e));
+        }
+    };
 
     // Clone for response before moving into database update
     let vendor_valuations_for_response = vendor_valuations.clone();
     let discount_consumption_for_response = discount_consumption.clone();
 
-    // Update payment with calculated data
+    // Update payment with calculated data (including initial bundle)
     if let Err(e) = db.update_payment_with_calculations(
         &payment_id,
         vendor_valuations,
         discount_consumption,
         payment_bundle.clone(),
+        initial_payment_bundle.clone(),
     ).await {
         log::error!("Failed to update payment with calculations: {:?}", e);
         return Err(e);
@@ -267,19 +298,20 @@ pub async fn process_signed_transaction(
                     log::info!("Updated payment status to Completed for payment ID: {}", payment_id);
                     
                     // Perform post-transaction processing
-                    // 1. Update user preferences (subtract amount utilized)
-                    log::info!("Updating user preferences for payer: {}", supplement_data.payer_address);
+                    // 1. Update vendor preferences (subtract discount amounts consumed)
+                    log::info!("Updating vendor preferences after payment completion");
                     
-                    // Get the payment to retrieve discount consumption data
+                    // Get the payment to retrieve vendor address and discount consumption data
                     match db.get_payment_by_id(&payment_id).await {
                         Ok(payment) => {
-                            if let Some(discount_consumption) = payment.discount_consumption {
-                                // Update user preferences with consumed discounts
+                            if let Some(discount_consumption) = &payment.discount_consumption {
+                                // Update VENDOR's preferences with consumed discounts (NO effective valuations)
                                 if let Err(e) = db.update_user_preferences_after_payment(
-                                    &supplement_data.payer_address,
-                                    &discount_consumption
+                                    &payment.vendor_address,  // Use vendor address, not payer!
+                                    discount_consumption,
+                                    None,  // Don't update effective valuations in preferences
                                 ).await {
-                                    log::error!("Failed to update user preferences after payment: {}", e);
+                                    log::error!("Failed to update vendor preferences after payment: {}", e);
                                     // Don't fail the transaction, just log the error
                                 }
                             }
@@ -299,40 +331,56 @@ pub async fn process_signed_transaction(
                     // 3. Update token market values
                     log::info!("Updating market values for tokens used in transaction");
                     
-                    // Task 1: Create flattened transaction records
-                    // We need to calculate the vendor valuations again to get the effective valuations
-                    // Get vendor preferences to recalculate valuations
-                    match db.get_user_preferences(&supplement_data.vendor_address).await {
-                        Ok(vendor_preferences) => {
-                            // Recreate the vendor_valuations calculation
-                            let payer_balances: Vec<crate::models::TokenBalance> = supplement_data.payment_bundle.iter().map(|token| {
-                                crate::models::TokenBalance {
-                                    token_key: token.token_key.clone(),
-                                    symbol: token.symbol.clone(),
-                                    name: token.symbol.clone(), // Using symbol as name for now
-                                    balance: token.amount_to_pay, // Using amount_to_pay as proxy for balance
-                                    average_valuation: 1.0, // Default valuation
-                                    token_image_url: token.token_image_url.clone(),
+                    // Task 1: Create flattened transaction records with effective valuations
+                    match db.get_payment_by_id(&payment_id).await {
+                        Ok(payment) => {
+                            if let Some(initial_bundle) = &payment.initial_payment_bundle {
+                                let mut effective_valuations = Vec::new();
+                                
+                                for final_payment in &supplement_data.payment_bundle {
+                                    if let Some(initial_payment) = initial_bundle.iter()
+                                        .find(|p| p.token_key == final_payment.token_key) {
+                                        
+                                        if initial_payment.amount_to_pay > 0.0 {
+                                            let effective_val = final_payment.amount_to_pay / initial_payment.amount_to_pay;
+                                            effective_valuations.push((final_payment.symbol.clone(), effective_val));
+                                        }
+                                    }
                                 }
-                            }).collect();
-                            
-                            let (calculated_vendor_valuations, _) = calculate_vendor_valuations(
-                                &vendor_preferences, 
-                                &payer_balances, 
-                                supplement_data.price_usd
-                            );
-                            
-                            if let Err(e) = create_transaction_records_with_valuations(
-                                &db,
-                                &supplement_data.payment_bundle,
-                                &calculated_vendor_valuations,
-                                &payment_id
-                            ).await {
-                                log::error!("Failed to create transaction records: {}", e);
+                                
+                                if let Err(e) = create_transaction_records_with_effective_valuations(
+                                    &db,
+                                    &supplement_data.payment_bundle,
+                                    &effective_valuations,
+                                    &payment_id
+                                ).await {
+                                    log::error!("Failed to create transaction records: {}", e);
+                                }
+                            } else {
+                                // Missing data, use vendor valuations if available
+                                if let Some(vendor_valuations) = &payment.vendor_valuations {
+                                    if let Err(e) = create_transaction_records_with_vendor_valuations(
+                                        &db,
+                                        &supplement_data.payment_bundle,
+                                        vendor_valuations,
+                                        &payment_id
+                                    ).await {
+                                        log::error!("Failed to create transaction records: {}", e);
+                                    }
+                                } else {
+                                    // No valuations at all, use simple records
+                                    if let Err(e) = create_transaction_records_simple(
+                                        &db,
+                                        &supplement_data.payment_bundle,
+                                        &payment_id
+                                    ).await {
+                                        log::error!("Failed to create transaction records: {}", e);
+                                    }
+                                }
                             }
                         },
                         Err(e) => {
-                            log::error!("Failed to get vendor preferences for transaction records: {}", e);
+                            log::error!("Failed to get payment for transaction records: {}", e);
                             // Fallback to simple records
                             if let Err(e) = create_transaction_records_simple(
                                 &db,
@@ -717,7 +765,45 @@ async fn calculate_new_market_price(
     Ok(new_market_price)
 }
 
-async fn create_transaction_records_with_valuations(
+async fn create_transaction_records_with_effective_valuations(
+    db: &MongoDBService,
+    payment_bundle: &[TokenPayment],
+    effective_valuations: &[(String, f64)],
+    payment_id: &str
+) -> Result<(), ApiError> {
+    log::info!("Creating transaction records with effective valuations for payment {}", payment_id);
+    log::info!("Payment bundle has {} tokens", payment_bundle.len());
+    
+    // For each token in payment_bundle, create a transaction record with effective valuation
+    for token_payment in payment_bundle {
+        // Find the corresponding effective valuation for this token
+        let effective_valuation = effective_valuations.iter()
+            .find(|(symbol, _)| symbol == &token_payment.symbol)
+            .map(|(_, val)| *val)
+            .unwrap_or(1.0); // Fallback to 1.0 if no effective valuation found
+        
+        let record = TransactionRecord {
+            id: None,
+            token_key: token_payment.token_key.clone(),
+            symbol: token_payment.symbol.clone(),
+            amount_paid: token_payment.amount_to_pay,
+            effective_valuation, // Use the calculated effective valuation
+            timestamp: Utc::now(),
+            payment_id: payment_id.to_string(),
+        };
+        
+        match db.create_transaction_record(record).await {
+            Ok(_) => log::info!("Created transaction record for token {} with effective valuation {}", 
+                token_payment.symbol, effective_valuation),
+            Err(e) => log::error!("Failed to create transaction record for token {}: {}", 
+                token_payment.symbol, e),
+        }
+    }
+    
+    Ok(())
+}
+
+async fn create_transaction_records_with_vendor_valuations(
     db: &MongoDBService,
     payment_bundle: &[TokenPayment],
     vendor_valuations: &[TokenValuation],
@@ -739,13 +825,13 @@ async fn create_transaction_records_with_valuations(
             token_key: token_payment.token_key.clone(),
             symbol: token_payment.symbol.clone(),
             amount_paid: token_payment.amount_to_pay,
-            effective_valuation, // Use actual vendor valuation directly from TokenValuation
+            effective_valuation, // Use vendor's valuation (without discount effects)
             timestamp: Utc::now(),
             payment_id: payment_id.to_string(),
         };
         
         match db.create_transaction_record(record).await {
-            Ok(_) => log::info!("Created transaction record for token {} with valuation {}", 
+            Ok(_) => log::info!("Created transaction record for token {} with vendor valuation {}", 
                 token_payment.symbol, effective_valuation),
             Err(e) => log::error!("Failed to create transaction record for token {}: {}", 
                 token_payment.symbol, e),

@@ -555,10 +555,14 @@ impl CauseService {
         let account_id_obj = stripe::AccountId::from_str(&account_id)
             .map_err(|_| ApiError::ValidationError("Invalid account ID".to_string()))?;
         
+        let frontend_url = std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let refresh_url = format!("{}/causes/onboarding/refresh?cause_id={}", frontend_url, cause_id);
+        let return_url = format!("{}/causes/onboarding/complete?cause_id={}", frontend_url, cause_id);
+        
         let account_link_params = stripe::CreateAccountLink {
             account: account_id_obj,
-            refresh_url: Some("https://your-app.com/causes/onboarding/refresh"), // Update with your URL
-            return_url: Some("https://your-app.com/causes/onboarding/complete"), // Update with your URL
+            refresh_url: Some(&refresh_url),
+            return_url: Some(&return_url),
             type_: stripe::AccountLinkType::AccountOnboarding,
             collect: None,
             collection_options: None,

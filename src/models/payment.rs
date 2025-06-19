@@ -17,6 +17,7 @@ pub struct Payment {
     pub vendor_valuations: Option<Vec<TokenValuation>>,
     pub discount_consumption: Option<Vec<DiscountConsumption>>,
     pub computed_payment: Option<Vec<TokenPayment>>,
+    pub initial_payment_bundle: Option<Vec<TokenPayment>>,  // Before discounts
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
