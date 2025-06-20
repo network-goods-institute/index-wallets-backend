@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("SERVER_PORT must be a number");
     let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
     let base_rpc = env::var("BASE_RPC").unwrap_or_else(|_| delta_executor_sdk::base::rpc::DEFAULT_URL.to_string());
-    let stripe_api = env::var("STRIPE_SECRET_TEST").unwrap_or_else(|_| "".to_string());
+    let stripe_api = env::var("STRIPE_SECRET_KEY").unwrap_or_else(|_| "".to_string());
     let stripe_webhook_secret = env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_else(|_| "".to_string());
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or(log_level));
