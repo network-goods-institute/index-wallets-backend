@@ -92,10 +92,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("SERVER_PORT must be a number");
     let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
     let base_rpc = env::var("BASE_RPC").unwrap_or_else(|_| delta_executor_sdk::base::rpc::DEFAULT_URL.to_string());
-    let stripe_api = env::var("STRIPE_SECRET_KEY").unwrap_or_else(|_| "".to_string());
+    let stripe_api = env::var("STRIPE_SECRET_KEY").unwrap_or_else(|e| {
+        error!("STRIPE_SECRET_KEY not found in environment: {}", e);
+        "".to_string()
+    });
     let stripe_webhook_secret = env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_else(|_| "".to_string());
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or(log_level));
+    
+    // Log Stripe configuration status
+    if stripe_api.is_empty() {
+        error!("STRIPE_SECRET_KEY is empty - Stripe operations will fail!");
+    } else {
+        info!("Stripe API key loaded: {} characters, starts with: {}, type: {}", 
+            stripe_api.len(),
+            &stripe_api.chars().take(7).collect::<String>(),
+            if stripe_api.contains("_live_") { "LIVE" } else if stripe_api.contains("_test_") { "TEST" } else { "UNKNOWN" }
+        );
+    }
     
     let mongodb = MongoDBService::init()
         .await

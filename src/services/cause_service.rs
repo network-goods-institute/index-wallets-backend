@@ -102,6 +102,8 @@ impl CauseService {
                 }
             })?;
         
+        info!("Creating Stripe Connected Account for cause: {} (draft_id: {})", cause_data.name, draft_id);
+        
         // Create Stripe Connected Account with draft metadata
         let account_params = stripe::CreateAccount {
             type_: Some(stripe::AccountType::Express),
@@ -124,12 +126,21 @@ impl CauseService {
             ..Default::default()
         };
         
-        let account = stripe::Account::create(&self.stripe_client, account_params)
-            .await
-            .map_err(|e| {
-                error!("Failed to create Stripe Connected Account: {}", e);
-                ApiError::StripeError(format!("Stripe account creation failed: {}", e))
-            })?;
+        info!("Calling Stripe API to create account...");
+        let account = match stripe::Account::create(&self.stripe_client, account_params).await {
+            Ok(acc) => {
+                info!("Successfully created Stripe account with ID: {}", acc.id);
+                acc
+            },
+            Err(e) => {
+                error!("Stripe API call failed: {:?}", e);
+                error!("Error details - Type: {}, Message: {}", 
+                    std::any::type_name_of_val(&e), 
+                    e.to_string()
+                );
+                return Err(ApiError::StripeError(format!("Stripe account creation failed: {}", e)));
+            }
+        };
         
         // Update draft with Stripe account ID
         let draft_object_id = ObjectId::parse_str(&draft_id)

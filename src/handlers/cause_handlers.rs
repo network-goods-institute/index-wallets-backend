@@ -29,7 +29,9 @@ pub async fn create_cause(
     cause_data: web::Json<CreateCauseRequest>,
 ) -> actix_web::Result<impl Responder> {
     info!("Creating new cause: {}", cause_data.name);
+    info!("Cause data: {:?}", cause_data);
     
+    info!("Calling cause service to create cause...");
     match cause_service.create_cause(cause_data.into_inner()).await {
         Ok(response) => {
             info!("Successfully created cause draft");
