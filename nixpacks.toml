@@ -1,8 +1,2 @@
 [phases.setup]
 aptPkgs = ["protobuf-compiler", "libprotobuf-dev", "libssl-dev"]
-
-[phases.build]
-cmds = ["cargo build --release", "ls -la target/release/"]
-
-[start]
-cmd = "/app/target/release/index-wallets-backend"
