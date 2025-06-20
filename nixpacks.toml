@@ -5,4 +5,4 @@ aptPkgs = ["protobuf-compiler", "libprotobuf-dev", "libssl-dev"]
 cmds = ["cargo build --release", "ls -la target/release/"]
 
 [start]
-cmd = "target/release/index_wallets_backend"
+cmd = "/app/target/release/index-wallets-backend"
