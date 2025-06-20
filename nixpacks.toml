@@ -1,6 +1,6 @@
 [phases.setup]
-nixPkgs = ["...", "openssl", "pkg-config"]
-aptPkgs = ["libssl-dev"]
+nixPkgs = ["...", "openssl", "pkg-config", "protobuf"]
+aptPkgs = ["libssl-dev", "protobuf-compiler"]
 
 [phases.build]
 cmds = ["cargo build --release"]
