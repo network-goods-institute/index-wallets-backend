@@ -1,9 +1,8 @@
 [phases.setup]
-nixPkgs = ["...", "openssl", "pkg-config", "protobuf"]
-aptPkgs = ["libssl-dev", "protobuf-compiler"]
+aptPkgs = ["protobuf-compiler", "libprotobuf-dev", "libssl-dev"]
 
 [phases.build]
-cmds = ["cargo build --release"]
+cmds = ["cargo build --release", "ls -la target/release/"]
 
 [start]
-cmd = "./target/release/index_wallets_backend"
+cmd = "target/release/index_wallets_backend"
