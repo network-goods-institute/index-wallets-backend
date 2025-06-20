@@ -38,6 +38,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 async-stripe = { version = "0.31", features = ["runtime-tokio-hyper"] }
 thiserror = "1.0"
+openssl = { version = "*", features = ["vendored"] }
 
 
 [dev-dependencies]
