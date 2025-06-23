@@ -165,3 +165,36 @@ pub async fn get_vault(wallet_address: web::Path<String>, wallet_service: web::D
         }
     }
 }
+
+/// Get user info by wallet address
+pub async fn get_user_info(
+    mongodb: web::Data<MongoDBService>,
+    wallet_address: web::Path<String>
+) -> HttpResponse {
+    info!("Fetching user info for wallet: {}", wallet_address);
+    
+    match mongodb.get_user_by_wallet(&wallet_address).await {
+        Ok(Some(user)) => {
+            info!("Found user: {}", user.username);
+            HttpResponse::Ok().json(json!({
+                "username": user.username,
+                "wallet_address": user.wallet_address,
+                "exists": true
+            }))
+        },
+        Ok(None) => {
+            info!("User not found for wallet: {}", wallet_address);
+            HttpResponse::Ok().json(json!({
+                "exists": false,
+                "message": "User not found"
+            }))
+        },
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            HttpResponse::InternalServerError().json(json!({
+                "error": "Failed to fetch user",
+                "details": e.to_string()
+            }))
+        }
+    }
+}

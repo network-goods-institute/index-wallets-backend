@@ -8,6 +8,7 @@ use serde_json::json;
 use crate::models::{Message, User, CreateUserRequest, Preferences, ApiError, Payment, CreatePaymentRequest, PaymentStatus, PaymentIdResponse, SupplementPaymentRequest, SupplementPaymentResponse, TokenPayment, TransactionRecord, TokenValuation, DepositRecord};
 use crate::models::payment::{PaymentStatusResponse, ProcessSignedTransactionRequest, TransactionHistoryResponse, TransactionHistoryItem, TransactionDirection, ActivityItem};
 use crate::utils::{calculate_vendor_valuations, calculate_payment_bundle, apply_discounts_to_payment, calculate_post_payment_valuations, verify_sufficient_funds_after_discounts};
+use crate::utils::payment_code::normalize_payment_code;
 use crate::services::{MongoDBService, TokenService, WalletService};
 use ed25519_dalek::SigningKey;
 use chrono::Utc;
@@ -120,14 +121,18 @@ pub async fn supplement_transaction(
     db: web::Data<MongoDBService>,
     wallet_service: web::Data<WalletService>,
 ) -> Result<HttpResponse, ApiError> {
+    // Normalize the payment code to handle common input errors
+    let normalized_payment_id = normalize_payment_code(&payment_id);
+    
     log::info!(
-        "Supplementing transaction. Payment ID: {}, Payer Address: {}", 
+        "Supplementing transaction. Payment ID: {} (normalized: {}), Payer Address: {}", 
         payment_id, 
+        normalized_payment_id,
         supplement_data.payer_address
     );
     
     let payment = match db.update_payment_with_payer(
-        &payment_id,
+        &normalized_payment_id,
         supplement_data.payer_address.clone(),
         supplement_data.payer_username.clone(),
     ).await {
@@ -457,10 +462,13 @@ pub async fn get_payment_status(
     payment_id: web::Path<String>,
     db: web::Data<MongoDBService>,
 ) -> Result<HttpResponse, ApiError> {
+    // Normalize the payment code to handle common input errors
+    let normalized_payment_id = normalize_payment_code(&payment_id);
+    
     log::info!("=== PAYMENT STATUS REQUEST ===");
-    log::info!("Requested payment ID: {}", payment_id);
+    log::info!("Requested payment ID: {} (normalized: {})", payment_id, normalized_payment_id);
 
-    let payment = match db.get_payment(&payment_id).await {
+    let payment = match db.get_payment(&normalized_payment_id).await {
         Ok(Some(payment)) => {
             log::info!("✅ Payment found in database");
             log::info!("Payment ID: {}", payment.payment_id);

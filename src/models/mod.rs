@@ -7,6 +7,7 @@ pub mod token;
 pub mod cause;
 pub mod cause_draft;
 mod webhook;
+pub mod partnered_vendor;
 
 pub use message::Message;
 pub use key::KeyPair;
@@ -16,3 +17,4 @@ pub use token::{Token, TokenValuation, DiscountConsumption, TokenPayment, TokenB
 pub use payment::{Payment, PaymentStatus, CreatePaymentRequest, PaymentIdResponse, SupplementPaymentRequest, SupplementPaymentResponse, DepositRecord};
 pub use webhook::WebhookError;
 pub use cause_draft::{CauseDraft, DraftStatus};
+pub use partnered_vendor::PartneredVendor;

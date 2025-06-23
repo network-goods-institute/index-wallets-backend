@@ -9,5 +9,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{wallet_address}/balances", web::get().to(wallet_handlers::get_user_balances))
             .route("/{wallet_address}/valuations", web::get().to(wallet_handlers::get_user_valuations))
             .route("/{wallet_address}/valuations", web::post().to(wallet_handlers::update_user_valuation))
+            .route("/{wallet_address}/user", web::get().to(wallet_handlers::get_user_info))
     );
 }

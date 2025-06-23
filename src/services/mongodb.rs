@@ -2,7 +2,7 @@ use mongodb::{Client, Collection};
 use mongodb::bson::{self, doc, Document, oid::ObjectId};
 use mongodb::options::{ClientOptions, ServerApi, ServerApiVersion, IndexOptions};
 use mongodb::IndexModel;
-use crate::models::{ApiError, User, Preferences, CreateUserRequest, Payment, Token, TokenValuation, DiscountConsumption, TokenPayment, PaymentStatus, TransactionRecord, CauseDraft, DraftStatus, DepositRecord};
+use crate::models::{ApiError, User, Preferences, CreateUserRequest, Payment, Token, TokenValuation, DiscountConsumption, TokenPayment, PaymentStatus, TransactionRecord, CauseDraft, DraftStatus, DepositRecord, PartneredVendor};
 use crate::models::cause::Cause;
 use futures_util::{TryStreamExt, StreamExt};
 use crate::services::cause_service::UpdateCauseRequest;
@@ -18,6 +18,7 @@ pub struct MongoDBService {
     cause_drafts: Collection<CauseDraft>,
     transaction_records: Collection<TransactionRecord>,
     deposit_records: Collection<DepositRecord>,
+    partnered_vendors: Collection<PartneredVendor>,
 }
 
 impl MongoDBService {
@@ -60,6 +61,7 @@ impl MongoDBService {
         let cause_drafts = db.collection::<CauseDraft>("cause_drafts");
         let transaction_records = db.collection("transaction_records");
         let deposit_records = db.collection::<DepositRecord>("deposit_records");
+        let partnered_vendors = db.collection::<PartneredVendor>("partnered_vendors");
         
         // Create unique index for wallet_address only
         let options = IndexOptions::builder().unique(true).build();
@@ -145,7 +147,7 @@ impl MongoDBService {
             .build();
         causes.create_index(compound_model, None).await?;
         
-        Ok(Self { users, transactions, tokens, causes, cause_drafts, transaction_records, deposit_records })
+        Ok(Self { users, transactions, tokens, causes, cause_drafts, transaction_records, deposit_records, partnered_vendors })
     }
 
     pub async fn create_user(&self, user: User) -> Result<User, ApiError> {
@@ -853,5 +855,20 @@ impl MongoDBService {
         payments.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         
         Ok(payments)
+    }
+    
+    // Get all partnered vendors
+    pub async fn get_all_partnered_vendors(&self) -> Result<Vec<PartneredVendor>, ApiError> {
+        let mut cursor = self.partnered_vendors
+            .find(None, None)
+            .await
+            .map_err(ApiError::DatabaseError)?;
+        
+        let mut vendors = Vec::new();
+        while let Some(vendor) = cursor.try_next().await.map_err(ApiError::DatabaseError)? {
+            vendors.push(vendor);
+        }
+        
+        Ok(vendors)
     }
 }

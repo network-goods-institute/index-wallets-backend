@@ -3,6 +3,7 @@ pub mod vault_handler;
 pub mod cause_handlers;
 pub mod webhook_handlers;
 pub mod wallet_handlers;
+pub mod vendor_handlers;
 
 pub use message_handler::*;
 pub use vault_handler::*;
