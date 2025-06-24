@@ -346,8 +346,8 @@ pub async fn process_signed_transaction(
                                     if let Some(initial_payment) = initial_bundle.iter()
                                         .find(|p| p.token_key == final_payment.token_key) {
                                         
-                                        if initial_payment.amount_to_pay > 0.0 {
-                                            let effective_val = final_payment.amount_to_pay / initial_payment.amount_to_pay;
+                                        if final_payment.amount_to_pay > 0.0 {
+                                            let effective_val = initial_payment.amount_to_pay / final_payment.amount_to_pay;
                                             effective_valuations.push((final_payment.symbol.clone(), effective_val));
                                         }
                                     }
