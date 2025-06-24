@@ -97,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "".to_string()
     });
     let stripe_webhook_secret = env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_else(|_| "".to_string());
+    let stripe_purchases_webhook_secret = env::var("STRIPE_PURCHASES_WEBHOOK_SECRET").unwrap_or_else(|_| "".to_string());
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or(log_level));
     
@@ -144,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let webhook_service = web::Data::new(WebhookService::new(
         stripe_webhook_secret,
+        stripe_purchases_webhook_secret,
         Arc::new(token_service.get_ref().clone()),
         Arc::new(mongodb_data.get_ref().clone()),
         key_config.central_vault_keypair.clone(),

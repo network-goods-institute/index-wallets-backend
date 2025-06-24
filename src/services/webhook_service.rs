@@ -10,6 +10,7 @@ use mongodb::bson::oid::ObjectId;
 
 pub struct WebhookService {
     stripe_secret: String,
+    stripe_purchases_secret: String,
     token_service: Arc<TokenService>,
     mongodb_service: Arc<MongoDBService>,
     central_vault_keypair: Ed25519PrivKey,
@@ -19,6 +20,7 @@ pub struct WebhookService {
 impl WebhookService {
     pub fn new(
         stripe_secret: String,
+        stripe_purchases_secret: String,
         token_service: Arc<TokenService>,
         mongodb_service: Arc<MongoDBService>,
         central_vault_keypair: Ed25519PrivKey,
@@ -27,6 +29,7 @@ impl WebhookService {
         info!("Network goods vault address: {}", network_goods_vault_keypair.pub_key());
         Self {
             stripe_secret,
+            stripe_purchases_secret,
             token_service,
             mongodb_service,
             central_vault_keypair,
@@ -36,6 +39,10 @@ impl WebhookService {
 
     pub fn get_stripe_secret(&self) -> &str {
         &self.stripe_secret
+    }
+
+    pub fn get_stripe_purchases_secret(&self) -> &str {
+        &self.stripe_purchases_secret
     }
 
     pub async fn credit_account(
