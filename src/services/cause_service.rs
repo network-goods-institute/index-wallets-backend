@@ -826,7 +826,7 @@ impl CauseService {
         // Minting token for cause
         
         // Initial supply for the cause token
-        let initial_supply = 1_000_000; // 1 million tokens
+        let initial_supply = 100_000_000; // 100 million tokens => 1M USD(ish) 
         
         // Create the token using TokenService - it handles all the configuration internally
         let token = self.token_service.create_token_for_cause(

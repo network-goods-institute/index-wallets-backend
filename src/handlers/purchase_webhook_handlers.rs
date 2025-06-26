@@ -15,6 +15,13 @@ pub async fn handle_stripe_purchases_webhook(
     match process_stripe_purchases_webhook(&req, &payload, webhook_service, mongodb_service).await {
         Ok(_) => HttpResponse::Ok().finish(),
         Err(e) => {
+            // Check if it's a parsing error for refunds field
+            if let WebhookError::StripeError(stripe::StripeError::BadParse(ref parse_err)) = e {
+                if parse_err.to_string().contains("missing field `refunds`") {
+                    info!("Ignoring known parsing error for refunds field - returning success");
+                    return HttpResponse::Ok().finish();
+                }
+            }
             error!("Purchases webhook error: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Webhook error: {:?}", e))
         }
