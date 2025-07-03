@@ -43,14 +43,10 @@ pub async fn create_user(
     user_data: web::Json<CreateUserRequest>,
     db: web::Data<MongoDBService>,
 ) -> Result<HttpResponse, ApiError> {
-    let user = User {
-        id: None,
-        wallet_address: user_data.wallet_address.clone(),
-        username: user_data.username.clone(),
-        preferences: user_data.preferences.clone().unwrap_or(Preferences(Document::new())),
-    };
-
-    let created_user = db.create_user(user).await?;
+    // Use the new method that handles both user and vendor creation
+    let created_user = db.create_user_with_vendor_if_needed(user_data.into_inner()).await?;
+    
+    // Return the created user (vendor record is created automatically if needed)
     Ok(HttpResponse::Created().json(created_user))
 }
 
@@ -81,6 +77,7 @@ pub async fn create_payment(
         payment_id: payment_id.clone(),
         vendor_address: payment_request.vendor_address.clone(),
         vendor_name: payment_request.vendor_name.clone(),
+        recepient_verified: payment_request.is_verified, 
         price_usd: payment_request.price_usd,
         customer_address: None,
         customer_username: None,
@@ -297,19 +294,57 @@ pub async fn process_signed_transaction(
         Ok(_) => {
             log::info!("Successfully submitted transaction for payment ID: {}", payment_id);
             
+            // Get the payment to check if recipient is verified
+            let payment = match db.get_payment_by_id(&payment_id).await {
+                Ok(payment) => Some(payment),
+                Err(e) => {
+                    log::error!("Failed to get payment after transaction submission: {}", e);
+                    // Don't have payment data, so we'll assume unverified and skip post-processing
+                    None
+                }
+            };
+            
             // Update payment status to completed
             match db.update_payment_status(&payment_id, PaymentStatus::Completed).await {
                 Ok(_) => {
                     log::info!("Updated payment status to Completed for payment ID: {}", payment_id);
                     
-                    // Perform post-transaction processing
+                    // Check if recipient is verified before doing any post-processing
+                    let is_recipient_verified = payment.as_ref().map(|p| p.recepient_verified).unwrap_or(false);
+                    log::info!("Payment verification status check - payment exists: {}, is_verified: {}", 
+                        payment.is_some(), is_recipient_verified);
+                    
+                    if !is_recipient_verified {
+                        log::info!("Recipient not verified (is_verified={}), skipping all post-transaction processing", is_recipient_verified);
+                        return Ok(HttpResponse::Ok().json(PaymentStatusResponse {
+                            payment_id: payment_id.clone(),
+                            vendor_address: supplement_data.vendor_address.clone(),
+                            vendor_name: supplement_data.vendor_name.clone(),
+                            customer_address: Some(supplement_data.payer_address.clone()),
+                            status: PaymentStatus::Completed,
+                            created_at: payment.as_ref().map(|p| p.created_at).unwrap_or(chrono::Utc::now().timestamp()),
+                            price_usd: supplement_data.price_usd,
+                            payment_bundle: Some(supplement_data.payment_bundle.clone()),
+                            computed_payment: Some(supplement_data.payment_bundle.clone()),
+                            vendor_valuations: supplement_data.vendor_valuations.clone(),
+                            discount_consumption: supplement_data.discount_consumption.clone(),
+                        }));
+                    }
+                    
+                    // Perform post-transaction processing only for verified recipients
+                    log::info!("✅ Recipient is verified (is_verified=true), performing post-transaction processing");
+                    
                     // 1. Update vendor preferences (subtract discount amounts consumed)
-                    log::info!("Updating vendor preferences after payment completion");
+                    log::info!("Step 1: Updating vendor preferences after payment completion");
                     
                     // Get the payment to retrieve vendor address and discount consumption data
                     match db.get_payment_by_id(&payment_id).await {
                         Ok(payment) => {
                             if let Some(discount_consumption) = &payment.discount_consumption {
+                                log::info!("  Found discount consumption data with {} items", discount_consumption.len());
+                                for dc in discount_consumption {
+                                    log::info!("    - Token {} consumed {} discount/premium", dc.symbol, dc.amount_used);
+                                }
                                 // Update VENDOR's preferences with consumed discounts (NO effective valuations)
                                 if let Err(e) = db.update_user_preferences_after_payment(
                                     &payment.vendor_address,  // Use vendor address, not payer!
@@ -318,7 +353,11 @@ pub async fn process_signed_transaction(
                                 ).await {
                                     log::error!("Failed to update vendor preferences after payment: {}", e);
                                     // Don't fail the transaction, just log the error
+                                } else {
+                                    log::info!("  ✅ Successfully updated vendor preferences");
                                 }
+                            } else {
+                                log::info!("  No discount consumption to update");
                             }
                         },
                         Err(e) => {
@@ -327,14 +366,14 @@ pub async fn process_signed_transaction(
                     }
                     
                     // 2. Flatten each token payment into multiple transactions to save
-                    log::info!("Processing payment bundle with {} token payments", supplement_data.payment_bundle.len());
+                    log::info!("Step 2: Processing payment bundle with {} token payments", supplement_data.payment_bundle.len());
                     for token_payment in &supplement_data.payment_bundle {
-                        log::info!("Processed token payment: {} {}", token_payment.amount_to_pay, token_payment.symbol);
+                        log::info!("  - Token payment: {} {} (token_key: {})", token_payment.amount_to_pay, token_payment.symbol, token_payment.token_key);
                         // This would be implemented in a future phase
                     }
                     
                     // 3. Update token market values
-                    log::info!("Updating market values for tokens used in transaction");
+                    log::info!("Step 3: Updating market values for tokens used in transaction");
                     
                     // Task 1: Create flattened transaction records with effective valuations
                     match db.get_payment_by_id(&payment_id).await {
@@ -398,9 +437,12 @@ pub async fn process_signed_transaction(
                     }
                     
                     // Task 2: Update market prices
+                    log::info!("Step 3b: Calling update_market_prices for {} tokens", supplement_data.payment_bundle.len());
                     if let Err(e) = update_market_prices(&db, &supplement_data.payment_bundle).await {
                         log::error!("Failed to update market prices: {}", e);
                         // Don't fail the whole transaction for this
+                    } else {
+                        log::info!("✅ Successfully updated market prices");
                     }
                     
                     // Task 3: Update vendor preferences (we'll skip this for now due to storage complexity)
@@ -465,56 +507,37 @@ pub async fn get_payment_status(
     // Normalize the payment code to handle common input errors
     let normalized_payment_id = normalize_payment_code(&payment_id);
     
-    log::info!("=== PAYMENT STATUS REQUEST ===");
-    log::info!("Requested payment ID: {} (normalized: {})", payment_id, normalized_payment_id);
+    // Commented out for less verbose logging during polling
+    // log::info!("=== PAYMENT STATUS REQUEST ===");
+    // log::info!("Requested payment ID: {} (normalized: {})", payment_id, normalized_payment_id);
 
     let payment = match db.get_payment(&normalized_payment_id).await {
         Ok(Some(payment)) => {
-            log::info!("✅ Payment found in database");
-            log::info!("Payment ID: {}", payment.payment_id);
-            log::info!("Vendor Address: {}", payment.vendor_address);
-            log::info!("Vendor Name: {}", payment.vendor_name);
-            log::info!("Customer Address: {:?}", payment.customer_address);
-            log::info!("Status: {:?}", payment.status);
-            log::info!("Price USD: {}", payment.price_usd);
-            log::info!("Created At: {}", payment.created_at);
-            log::info!("Has vendor_valuations: {}", payment.vendor_valuations.is_some());
-            log::info!("Has discount_consumption: {}", payment.discount_consumption.is_some());
-            log::info!("Has computed_payment: {}", payment.computed_payment.is_some());
-            
-            if let Some(ref computed) = payment.computed_payment {
-                log::info!("Computed payment has {} tokens", computed.len());
-                for (i, token) in computed.iter().enumerate() {
-                    log::info!("  Token {}: {} {} (amount: {})", i, token.symbol, token.token_key, token.amount_to_pay);
-                }
-            }
-            
-            if let Some(ref vendor_vals) = payment.vendor_valuations {
-                log::info!("Vendor valuations: {:?}", vendor_vals);
-            }
+            // Minimal logging for polling
+            // log::debug!("Payment {} found with status {:?}", payment.payment_id, payment.status);
             
             payment
         },
         Ok(None) => {
-            log::error!("❌ Payment not found for ID: {}", payment_id);
+            // log::error!("❌ Payment not found for ID: {}", payment_id);
             return Err(ApiError::NotFound(format!("Payment with ID {} not found", payment_id)));
         },
         Err(e) => {
-            log::error!("❌ Database error retrieving payment {}: {}", payment_id, e);
+            // log::error!("❌ Database error retrieving payment {}: {}", payment_id, e);
             return Err(e);
         }
     };
 
 
-    // Log vendor valuations details
-    if let Some(ref valuations) = payment.vendor_valuations {
-        log::info!("✅ Payment has {} vendor valuations", valuations.len());
-        for (i, val) in valuations.iter().enumerate() {
-            log::info!("  Valuation {}: {} = {}", i, val.symbol, val.valuation);
-        }
-    } else {
-        log::info!("⚠️ Payment has no vendor valuations");
-    }
+    // Vendor valuations logging commented out for less noise
+    // if let Some(ref valuations) = payment.vendor_valuations {
+    //     log::info!("✅ Payment has {} vendor valuations", valuations.len());
+    //     for (i, val) in valuations.iter().enumerate() {
+    //         log::info!("  Valuation {}: {} = {}", i, val.symbol, val.valuation);
+    //     }
+    // } else {
+    //     log::info!("⚠️ Payment has no vendor valuations");
+    // }
 
     let response = PaymentStatusResponse {
         payment_id: payment.payment_id.clone(),
@@ -530,19 +553,20 @@ pub async fn get_payment_status(
         discount_consumption: payment.discount_consumption.clone(),
     };
 
-    log::info!("=== PAYMENT STATUS RESPONSE ===");
-    log::info!("Response payment_id: {}", response.payment_id);
-    log::info!("Response status: {:?}", response.status);
-    log::info!("Response has payment_bundle: {}", response.payment_bundle.is_some());
-    log::info!("Response has computed_payment: {}", response.computed_payment.is_some());
-    log::info!("Response has vendor_valuations: {}", response.vendor_valuations.is_some());
-    log::info!("Response has discount_consumption: {}", response.discount_consumption.is_some());
-    
-    if let Some(ref bundle) = response.payment_bundle {
-        log::info!("Payment bundle contains {} tokens", bundle.len());
-    }
-    
-    log::info!("Sending HTTP 200 OK response");
+    // Response logging commented out for less noise during polling
+    // log::info!("=== PAYMENT STATUS RESPONSE ===");
+    // log::info!("Response payment_id: {}", response.payment_id);
+    // log::info!("Response status: {:?}", response.status);
+    // log::info!("Response has payment_bundle: {}", response.payment_bundle.is_some());
+    // log::info!("Response has computed_payment: {}", response.computed_payment.is_some());
+    // log::info!("Response has vendor_valuations: {}", response.vendor_valuations.is_some());
+    // log::info!("Response has discount_consumption: {}", response.discount_consumption.is_some());
+    // 
+    // if let Some(ref bundle) = response.payment_bundle {
+    //     log::info!("Payment bundle contains {} tokens", bundle.len());
+    // }
+    // 
+    // log::info!("Sending HTTP 200 OK response");
     Ok(HttpResponse::Ok().json(response))
 }
 

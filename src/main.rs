@@ -42,7 +42,7 @@ async fn initialize_usd_token(token_service: &TokenService) -> Result<(), Box<dy
     info!("Checking if USD token exists...");
     
     // Check if USD token already exists in the database
-    match token_service.get_token_by_name("USD").await {
+    match token_service.get_token_by_symbol("USD").await {
         Ok(Some(token)) => {
             info!("USD token already exists with ID: {}", token.token_id);
             Ok(())
@@ -57,7 +57,7 @@ async fn initialize_usd_token(token_service: &TokenService) -> Result<(), Box<dy
             // Create the USD token with initial supply
             match token_service.create_token(
                 &issuer_keypair,
-                "USD",
+                "Index USD",
                 "USD",
                 1000000000, // 1 billion initial supply
                 Some("https://cdn.midjourney.com/487ad972-7260-4dfd-a8e8-8d3ea0911a90/0_2.png".to_string()), // Add your USD logo URL here

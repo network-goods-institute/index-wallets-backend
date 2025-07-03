@@ -176,6 +176,69 @@ impl MongoDBService {
         Ok(user)
     }
 
+    pub async fn create_partnered_vendor(&self, vendor: PartneredVendor) -> Result<PartneredVendor, ApiError> {
+        // Validate vendor data
+
+        if vendor.name.trim().is_empty() {
+            return Err(ApiError::ValidationError("Name cannot be empty".to_string()));
+        }
+
+        // Insert the vendor
+        self.partnered_vendors
+            .insert_one(vendor.clone(), None)
+            .await
+            .map_err(ApiError::DatabaseError)?;
+
+        Ok(vendor)
+    }
+
+    /// Create a user and optionally a partnered vendor if user_type is "vendor"
+    pub async fn create_user_with_vendor_if_needed(&self, request: CreateUserRequest) -> Result<User, ApiError> {
+        // Validate user_type
+        if request.user_type != "customer" && request.user_type != "vendor" {
+            return Err(ApiError::ValidationError("User type must be either 'customer' or 'vendor'".to_string()));
+        }
+
+        // Create the user first
+        let user = User {
+            id: None,
+            wallet_address: request.wallet_address.clone(),
+            username: request.username.clone(),
+            preferences: request.preferences.unwrap_or(Preferences(Document::new())),
+            is_verified: request.is_verified,
+            user_type: request.user_type.clone(),
+        };
+        
+        let created_user = self.create_user(user).await?;
+        
+        // If vendor, also create partnered vendor record
+        if request.user_type == "vendor" {
+            let vendor = PartneredVendor {
+                id: None,
+                name: created_user.username.clone(),  // Same as username
+                wallet_address: created_user.wallet_address.clone(),
+                description: request.vendor_description,
+                google_maps_link: request.vendor_google_maps_link,
+                website_link: request.vendor_website_link,
+            };
+            
+            // Create vendor record
+            match self.create_partnered_vendor(vendor).await {
+                Ok(_) => {
+                    log::info!("Created partnered vendor for wallet: {}", created_user.wallet_address);
+                },
+                Err(e) => {
+                    log::error!("Failed to create partnered vendor: {:?}", e);
+                    // Note: We don't rollback the user creation here
+                    // You might want to implement proper transaction handling
+                    return Err(ApiError::InternalError("User created but vendor record failed".to_string()));
+                }
+            }
+        }
+        
+        Ok(created_user)
+    }
+
     pub async fn get_user_by_wallet(&self, wallet_address: &str) -> Result<Option<User>, ApiError> {
         self.users
             .find_one(doc! { "wallet_address": wallet_address }, None)

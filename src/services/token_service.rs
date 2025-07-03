@@ -152,6 +152,10 @@ impl TokenService {
             .map_err(|e| format!("Failed to get token from database: {:?}", e))
     }
 
+    pub async fn get_token_by_symbol(&self, token_symbol: &str) -> Result<Option<Token>, String> {
+        self.mongodb.get_token_by_symbol(token_symbol).await
+            .map_err(|e| format!("Failed to get token from database: {:?}", e))
+    }
 
     
     /// Transfer tokens from one vault to another

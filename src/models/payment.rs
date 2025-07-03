@@ -18,6 +18,8 @@ pub struct Payment {
     pub discount_consumption: Option<Vec<DiscountConsumption>>,
     pub computed_payment: Option<Vec<TokenPayment>>,
     pub initial_payment_bundle: Option<Vec<TokenPayment>>,  // Before discounts
+    #[serde(default)]  // Will default to false for old records
+    pub recepient_verified: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -26,6 +28,8 @@ pub struct CreatePaymentRequest {
     pub vendor_name: String,
     pub price_usd: f64,
     pub vendor_valuations: Option<Vec<TokenValuation>>,
+    #[serde(default)]  // Will default to false for old requests
+    pub is_verified: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -64,9 +68,12 @@ pub struct ProcessSignedTransactionRequest {
     pub signed_transaction: String,
     pub vendor_address: String,
     pub vendor_name: String,
+    pub payer_address: String,
     pub price_usd: f64,
     pub payment_bundle: Vec<TokenPayment>,
-    pub payer_address: String,
+    pub computed_payment: Option<Vec<TokenPayment>>,
+    pub vendor_valuations: Option<Vec<TokenValuation>>,
+    pub discount_consumption: Option<Vec<DiscountConsumption>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
